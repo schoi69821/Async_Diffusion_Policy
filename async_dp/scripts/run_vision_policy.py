@@ -70,6 +70,15 @@ GRIPPER_OPEN_RAD = np.deg2rad(-35)    # open position
 GRIPPER_CLOSED_RAD = np.deg2rad(-71)  # closed position
 GRIPPER_CLOSE_THRESHOLD = 0.5        # classifier probability threshold
 
+# Position-based grasp zone (from training data analysis)
+# Gripper closes when arm is in this zone for GRASP_DWELL_STEPS consecutive steps
+GRASP_ZONE = {
+    'shoulder_max': np.deg2rad(5),    # shoulder < +5°
+    'elbow_min': np.deg2rad(-30),     # elbow > -30°
+    'elbow_max': np.deg2rad(-10),     # elbow < -10°
+}
+GRASP_DWELL_STEPS = 3  # consecutive steps in zone before closing
+
 
 def clamp_joints(joints):
     """Clamp joint positions to safe limits."""
@@ -393,6 +402,8 @@ def main():
     dt = 1.0 / args.exec_hz
     step = 0
     task_start = time.perf_counter()
+    grasp_dwell = 0
+    gripper_closed = False
 
     # Temporal ensemble
     ensemble = TemporalEnsemble(action_dim=NUM_JOINTS, k=args.ensemble_k)
@@ -449,7 +460,15 @@ def main():
             # Unnormalize
             action_traj = unnormalize_action(action_norm, stats)
 
-            # Override gripper with classifier if available
+            # Override gripper: position-based grasp zone detection
+            in_zone = (qpos[1] < GRASP_ZONE['shoulder_max'] and
+                       qpos[2] > GRASP_ZONE['elbow_min'] and
+                       qpos[2] < GRASP_ZONE['elbow_max'])
+            if in_zone:
+                grasp_dwell += 1
+            else:
+                grasp_dwell = 0
+
             grip_prob = -1.0
             if grip_clf is not None:
                 if obs_horizon == 1:
@@ -458,9 +477,18 @@ def main():
                 else:
                     grip_prob = grip_clf.predict(obs_imgs, obs_qpos,
                                                  progress=progress, device=device)
-                # Replace gripper (joint 6) in entire trajectory
-                grip_pos = GRIPPER_CLOSED_RAD if grip_prob > GRIPPER_CLOSE_THRESHOLD else GRIPPER_OPEN_RAD
-                action_traj[:, 6] = grip_pos
+
+            # Close gripper if: position-based zone OR classifier says close
+            should_close = (grasp_dwell >= GRASP_DWELL_STEPS) or \
+                          (grip_clf is not None and grip_prob > GRIPPER_CLOSE_THRESHOLD)
+            if should_close:
+                gripper_closed = True
+            # Once closed, stay closed until arm leaves grasp zone significantly
+            if gripper_closed and not in_zone and qpos[1] > np.deg2rad(30):
+                gripper_closed = False  # release when returning home
+
+            grip_pos = GRIPPER_CLOSED_RAD if gripper_closed else GRIPPER_OPEN_RAD
+            action_traj[:, 6] = grip_pos
 
             # Add to temporal ensemble
             ensemble.add_prediction(action_traj)
@@ -490,7 +518,9 @@ def main():
                 qpos_deg = [np.rad2deg(v) for v in qpos]
                 delta_deg = [p - q for p, q in zip(pred_deg, qpos_deg)]
                 n_preds = len(ensemble.predictions)
-                grip_str = f"grip_p={grip_prob:.2f}" if grip_prob >= 0 else "grip=DP"
+                zone_str = "ZONE" if in_zone else "----"
+                grip_state = "CLOSED" if gripper_closed else "OPEN"
+                grip_str = f"{zone_str} {grip_state} dw={grasp_dwell}"
                 print(f"  Step {step} | {infer_time:.0f}ms | prog={progress:.2f} | ens={n_preds} | {grip_str} | "
                       f"qpos: [{', '.join(f'{v:+.0f}' for v in qpos_deg)}] | "
                       f"pred: [{', '.join(f'{v:+.0f}' for v in pred_deg)}] | "
