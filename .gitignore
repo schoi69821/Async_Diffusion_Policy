@@ -1,0 +1,27 @@
+# MCP configuration (contains tokens)
+.mcp.json
+.claude/
+.env
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+assets/checkpoints/
+assets/data/
+
+# Old version (deprecated)
+old_async_dp/
+
+# Large data & model files
+async_dp/episodes/
+async_dp/recordings/
+async_dp/checkpoints/
+*.pth
+*.hdf5
+*.h5
+*.npy
+*.mp4
+
+# Logs
+*.log

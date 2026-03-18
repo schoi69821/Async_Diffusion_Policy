@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package asyncdp;
+
+// Robot Interface Service
+// Defines communication between Async DP and external robot controllers
+service RobotController {
+    // Get current robot state
+    rpc GetState(StateRequest) returns (RobotState);
+
+    // Send single action command
+    rpc SendAction(ActionCommand) returns (CommandResponse);
+
+    // Send full action trajectory
+    rpc SendTrajectory(TrajectoryCommand) returns (CommandResponse);
+
+    // Bidirectional streaming for real-time control
+    rpc StreamControl(stream ActionCommand) returns (stream RobotState);
+
+    // Get controller status
+    rpc GetStatus(StatusRequest) returns (ControllerStatus);
+}
+
+// Request for robot state
+message StateRequest {
+    bool include_velocity = 1;
+    bool include_effort = 2;
+}
+
+// Robot state response
+message RobotState {
+    repeated float qpos = 1;        // Joint positions
+    repeated float qvel = 2;        // Joint velocities
+    repeated float effort = 3;      // Joint efforts/torques
+    double timestamp = 4;           // State timestamp
+    bool is_valid = 5;              // State validity flag
+    uint64 sequence_id = 6;         // Sequence number
+}
+
+// Single action command
+message ActionCommand {
+    repeated float action = 1;      // Joint position command
+    double timestamp = 2;           // Command timestamp
+    uint64 sequence_id = 3;         // Sequence number
+    bool blocking = 4;              // Wait for execution
+}
+
+// Full trajectory command
+message TrajectoryCommand {
+    repeated float trajectory = 1;  // Flattened trajectory (horizon * action_dim)
+    int32 horizon = 2;              // Number of steps
+    int32 action_dim = 3;           // Action dimension
+    double timestamp = 4;           // Command timestamp
+    uint64 sequence_id = 5;         // Sequence number
+}
+
+// Command response
+message CommandResponse {
+    bool success = 1;
+    string message = 2;
+    uint64 sequence_id = 3;
+}
+
+// Status request
+message StatusRequest {}
+
+// Controller status
+message ControllerStatus {
+    string controller_name = 1;
+    bool is_ready = 2;
+    bool is_enabled = 3;
+    string mode = 4;                // "idle", "running", "error"
+    double control_frequency = 5;   // Hz
+    int32 action_dim = 6;
+    int32 obs_dim = 7;
+    map<string, string> metadata = 8;
+}
