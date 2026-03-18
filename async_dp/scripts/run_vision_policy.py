@@ -30,6 +30,7 @@ from dynamixel_sdk import (
     DXL_LOWORD, DXL_HIWORD
 )
 from src.models.vision_policy import VisionDiffusionPolicy
+from src.models.gripper_classifier import GripperClassifier
 from src.models.scheduler import get_scheduler
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -63,6 +64,11 @@ JOINT_LIMITS_RAD = np.array([
 
 # Max joint movement per step (radians)
 MAX_STEP_RAD = 0.15  # ~8.6 deg/step at 15Hz → max ~130 deg/s
+
+# Gripper positions (radians)
+GRIPPER_OPEN_RAD = np.deg2rad(-35)    # open position
+GRIPPER_CLOSED_RAD = np.deg2rad(-71)  # closed position
+GRIPPER_CLOSE_THRESHOLD = 0.5        # classifier probability threshold
 
 
 def clamp_joints(joints):
@@ -268,6 +274,23 @@ def load_model(checkpoint_path, device):
     return model, stats, obs_horizon
 
 
+def load_gripper_classifier(checkpoint_path, obs_horizon, device):
+    """Load gripper classifier. Returns None if not found."""
+    if not os.path.exists(checkpoint_path):
+        print(f"Gripper classifier not found at {checkpoint_path}, using diffusion policy gripper")
+        return None
+
+    ckpt = torch.load(checkpoint_path, map_location=device)
+    config = ckpt.get('config', {})
+    clf = GripperClassifier(qpos_dim=7, obs_horizon=config.get('obs_horizon', obs_horizon)).to(device)
+    clf.load_state_dict(ckpt['model'])
+    clf.eval()
+
+    num_params = sum(p.numel() for p in clf.parameters())
+    print(f"Gripper classifier loaded: {num_params:,} params, val_acc={ckpt.get('val_acc', '?'):.3f}")
+    return clf
+
+
 def normalize_qpos(qpos, stats):
     mn, mx = stats['qpos']['min'], stats['qpos']['max']
     rng = mx - mn
@@ -299,6 +322,7 @@ def main():
     parser.add_argument("--ensemble-k", type=float, default=0.01, help="Temporal ensemble decay factor (Chi et al. use 0.01)")
     parser.add_argument("--auto-start", action="store_true")
     parser.add_argument("--duration", type=float, default=45.0, help="Expected task duration (seconds)")
+    parser.add_argument("--gripper-ckpt", default=None, help="Gripper classifier checkpoint (auto-detected if not set)")
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -307,6 +331,13 @@ def main():
     # Load model (auto-detect obs_horizon)
     model, stats, obs_horizon = load_model(args.checkpoint, device)
     scheduler = get_scheduler('ddim', num_train_timesteps=100)
+
+    # Load gripper classifier
+    if args.gripper_ckpt is None:
+        # Auto-detect: look in checkpoints/gripper_classifier/best.pth
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        args.gripper_ckpt = os.path.join(base, "checkpoints", "gripper_classifier", "best.pth")
+    grip_clf = load_gripper_classifier(args.gripper_ckpt, obs_horizon, device)
 
     # Deterministic denoising: fixed generator for consistent predictions
     gen = torch.Generator(device=device)
@@ -322,9 +353,11 @@ def main():
     grabber.start()
     time.sleep(0.5)
 
+    grip_mode = "CLASSIFIER" if grip_clf else "DIFFUSION"
     print(f"\n{'='*60}")
     print(f"  VISION POLICY EXECUTION (Chi et al. pipeline)")
     print(f"  obs_horizon={obs_horizon}, chunk_size={args.chunk_size}, ensemble_k={args.ensemble_k}")
+    print(f"  Gripper: {grip_mode}")
     print(f"  Execution: {args.exec_hz} Hz, deterministic denoising")
     print(f"  Press ENTER to start, ENTER again to stop.")
     print(f"{'='*60}")
@@ -416,6 +449,19 @@ def main():
             # Unnormalize
             action_traj = unnormalize_action(action_norm, stats)
 
+            # Override gripper with classifier if available
+            grip_prob = -1.0
+            if grip_clf is not None:
+                if obs_horizon == 1:
+                    grip_prob = grip_clf.predict(obs_imgs[-1], obs_qpos[-1],
+                                                 progress=progress, device=device)
+                else:
+                    grip_prob = grip_clf.predict(obs_imgs, obs_qpos,
+                                                 progress=progress, device=device)
+                # Replace gripper (joint 6) in entire trajectory
+                grip_pos = GRIPPER_CLOSED_RAD if grip_prob > GRIPPER_CLOSE_THRESHOLD else GRIPPER_OPEN_RAD
+                action_traj[:, 6] = grip_pos
+
             # Add to temporal ensemble
             ensemble.add_prediction(action_traj)
 
@@ -444,7 +490,8 @@ def main():
                 qpos_deg = [np.rad2deg(v) for v in qpos]
                 delta_deg = [p - q for p, q in zip(pred_deg, qpos_deg)]
                 n_preds = len(ensemble.predictions)
-                print(f"  Step {step} | {infer_time:.0f}ms | prog={progress:.2f} | ens={n_preds} | "
+                grip_str = f"grip_p={grip_prob:.2f}" if grip_prob >= 0 else "grip=DP"
+                print(f"  Step {step} | {infer_time:.0f}ms | prog={progress:.2f} | ens={n_preds} | {grip_str} | "
                       f"qpos: [{', '.join(f'{v:+.0f}' for v in qpos_deg)}] | "
                       f"pred: [{', '.join(f'{v:+.0f}' for v in pred_deg)}] | "
                       f"delta: [{', '.join(f'{v:+.1f}' for v in delta_deg)}]")
