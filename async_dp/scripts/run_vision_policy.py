@@ -404,6 +404,7 @@ def main():
     task_start = time.perf_counter()
     grasp_dwell = 0
     gripper_closed = False
+    grasp_progress = 0.0
 
     # Temporal ensemble
     ensemble = TemporalEnsemble(action_dim=NUM_JOINTS, k=args.ensemble_k)
@@ -478,14 +479,17 @@ def main():
                     grip_prob = grip_clf.predict(obs_imgs, obs_qpos,
                                                  progress=progress, device=device)
 
-            # Close gripper if: position-based zone OR classifier says close
+            # Close gripper if: in grasp zone long enough OR classifier says close
             should_close = (grasp_dwell >= GRASP_DWELL_STEPS) or \
                           (grip_clf is not None and grip_prob > GRIPPER_CLOSE_THRESHOLD)
-            if should_close:
+            if should_close and not gripper_closed:
                 gripper_closed = True
-            # Once closed, stay closed until arm leaves grasp zone significantly
-            if gripper_closed and not in_zone and qpos[1] > np.deg2rad(30):
-                gripper_closed = False  # release when returning home
+                grasp_progress = progress  # record when we grasped
+
+            # Release: open gripper after holding for ~30% of task duration
+            # Training data shows release at progress 0.60-0.66
+            if gripper_closed and progress > grasp_progress + 0.25:
+                gripper_closed = False
 
             grip_pos = GRIPPER_CLOSED_RAD if gripper_closed else GRIPPER_OPEN_RAD
             action_traj[:, 6] = grip_pos
