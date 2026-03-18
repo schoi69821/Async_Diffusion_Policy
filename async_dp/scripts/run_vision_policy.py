@@ -479,19 +479,24 @@ def main():
                     grip_prob = grip_clf.predict(obs_imgs, obs_qpos,
                                                  progress=progress, device=device)
 
-            # Close gripper when arm is in grasp zone long enough (position-based only)
+            # Gripper control: let diffusion model drive gripper by default.
+            # Override ONLY when arm is in grasp zone (position-based trigger).
             should_close = grasp_dwell >= GRASP_DWELL_STEPS
             if should_close and not gripper_closed:
                 gripper_closed = True
-                grasp_progress = progress  # record when we grasped
+                grasp_progress = progress
 
-            # Release: open gripper after holding for ~30% of task duration
-            # Training data shows release at progress 0.60-0.66
+            # Release after holding for ~25% of task duration
             if gripper_closed and progress > grasp_progress + 0.25:
                 gripper_closed = False
 
-            grip_pos = GRIPPER_CLOSED_RAD if gripper_closed else GRIPPER_OPEN_RAD
-            action_traj[:, 6] = grip_pos
+            # Only override gripper when we have a definite decision
+            if gripper_closed:
+                action_traj[:, 6] = GRIPPER_CLOSED_RAD
+            elif grasp_progress > 0 and not gripper_closed:
+                # Post-release: force open
+                action_traj[:, 6] = GRIPPER_OPEN_RAD
+            # else: keep diffusion model's natural gripper output (initial descent phase)
 
             # Add to temporal ensemble
             ensemble.add_prediction(action_traj)
