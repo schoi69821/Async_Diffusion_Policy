@@ -282,7 +282,7 @@ def load_gripper_classifier(checkpoint_path, obs_horizon, device):
 
     ckpt = torch.load(checkpoint_path, map_location=device)
     config = ckpt.get('config', {})
-    clf = GripperClassifier(qpos_dim=7, obs_horizon=config.get('obs_horizon', obs_horizon)).to(device)
+    clf = GripperClassifier(qpos_dim=6, obs_horizon=config.get('obs_horizon', obs_horizon)).to(device)
     clf.load_state_dict(ckpt['model'])
     clf.eval()
 

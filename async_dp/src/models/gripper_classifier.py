@@ -22,9 +22,17 @@ class GripperClassifier(nn.Module):
         Concat → FC → sigmoid
     """
 
-    def __init__(self, qpos_dim=7, obs_horizon=1):
+    def __init__(self, qpos_dim=6, obs_horizon=1):
+        """
+        Args:
+            qpos_dim: Joint dimensions EXCLUDING gripper (default: 6).
+                      Gripper is excluded to prevent data leakage —
+                      the classifier must predict future gripper state
+                      from image + arm position, not current gripper position.
+        """
         super().__init__()
         self.obs_horizon = obs_horizon
+        self.qpos_dim = qpos_dim
 
         # Image encoder (lightweight, shared architecture with VisionEncoder)
         resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
@@ -36,7 +44,7 @@ class GripperClassifier(nn.Module):
             for param in child.parameters():
                 param.requires_grad = False
 
-        # QPos encoder
+        # QPos encoder (6 joints, no gripper)
         self.qpos_enc = nn.Sequential(
             nn.Linear(qpos_dim, 128),
             nn.GELU(),
@@ -75,11 +83,17 @@ class GripperClassifier(nn.Module):
         """
         Args:
             img: (B, 3, H, W) or (B, T, 3, H, W)
-            qpos: (B, qpos_dim) or (B, T, qpos_dim)
+            qpos: (B, 7) or (B, T, 7) — gripper (index 6) is stripped internally
             progress: (B, 1)
         Returns:
             logits: (B, 1) — apply sigmoid for probability
         """
+        # Strip gripper joint (index 6) to prevent data leakage
+        if qpos.dim() == 2:
+            qpos = qpos[:, :6]
+        elif qpos.dim() == 3:
+            qpos = qpos[:, :, :6]
+
         if img.dim() == 5:
             B, T = img.shape[:2]
             img_flat = img.reshape(B * T, *img.shape[2:])

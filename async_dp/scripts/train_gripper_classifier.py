@@ -70,7 +70,7 @@ def main():
     print(f"pos_weight: {pos_weight.item():.2f}")
 
     # Model
-    model = GripperClassifier(qpos_dim=7, obs_horizon=args.obs_horizon).to(device)
+    model = GripperClassifier(qpos_dim=6, obs_horizon=args.obs_horizon).to(device)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Classifier params: {num_params:,}")
 
@@ -103,14 +103,13 @@ def main():
             progress = batch['progress'].to(device)
             action = batch['action']  # (B, 16, 7)
 
-            # Label: is gripper closed at step 0 of predicted trajectory?
-            # Use unnormalized action for thresholding
-            action_grip = action[:, 0, 6]  # normalized gripper at step 0
-            # Unnormalize gripper
+            # Label: will gripper be closed at ANY step in the 16-step trajectory?
+            # This predicts FUTURE intent, not current state
             mn = dataset.stats['action']['min'][6]
             mx = dataset.stats['action']['max'][6]
-            grip_raw = (action_grip + 1) / 2 * (mx - mn) + mn
-            labels = (grip_raw < GRIPPER_THRESHOLD_RAD).float().unsqueeze(1).to(device)
+            grip_all = action[:, :, 6]  # (B, 16) normalized gripper across trajectory
+            grip_raw = (grip_all + 1) / 2 * (mx - mn) + mn  # unnormalize
+            labels = (grip_raw.min(dim=1).values < GRIPPER_THRESHOLD_RAD).float().unsqueeze(1).to(device)
 
             logits = model(img, qpos, progress)
             loss = criterion(logits, labels)
