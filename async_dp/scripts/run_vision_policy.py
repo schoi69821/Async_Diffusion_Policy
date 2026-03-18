@@ -479,9 +479,8 @@ def main():
                     grip_prob = grip_clf.predict(obs_imgs, obs_qpos,
                                                  progress=progress, device=device)
 
-            # Close gripper if: in grasp zone long enough OR classifier says close
-            should_close = (grasp_dwell >= GRASP_DWELL_STEPS) or \
-                          (grip_clf is not None and grip_prob > GRIPPER_CLOSE_THRESHOLD)
+            # Close gripper when arm is in grasp zone long enough (position-based only)
+            should_close = grasp_dwell >= GRASP_DWELL_STEPS
             if should_close and not gripper_closed:
                 gripper_closed = True
                 grasp_progress = progress  # record when we grasped
