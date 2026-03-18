@@ -467,7 +467,8 @@ def main():
                        qpos[2] < GRASP_ZONE['elbow_max'])
             if in_zone:
                 grasp_dwell += 1
-            else:
+            elif not gripper_closed:
+                # Only reset dwell counter if we haven't grasped yet
                 grasp_dwell = 0
 
             grip_prob = -1.0
