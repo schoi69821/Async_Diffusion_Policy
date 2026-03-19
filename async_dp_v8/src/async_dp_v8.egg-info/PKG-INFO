@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: async-dp-v8
+Version: 0.1.0
+Summary: Asynchronous Diffusion Policy v8 for robotic wafer inspection
+Requires-Python: >=3.10
+Requires-Dist: torch
+Requires-Dist: torchvision
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: pyarrow
+Requires-Dist: h5py
+Requires-Dist: opencv-python
+Requires-Dist: pyyaml
+Requires-Dist: diffusers
+Requires-Dist: dynamixel-sdk
+Requires-Dist: scipy
+Requires-Dist: tqdm
+Requires-Dist: tensorboard
+Requires-Dist: einops
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
