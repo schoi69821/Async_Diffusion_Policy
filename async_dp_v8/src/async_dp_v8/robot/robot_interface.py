@@ -155,11 +155,39 @@ class RobotInterface:
 
         self.open_gripper()
 
-    def _execute_lift_primitive(self, delta_z_mm: float):
-        """Simple lift primitive - move current position up by delta_z."""
-        # For now, adjust the wrist joint slightly upward
-        # In production this should use IK
-        pass
+    def _execute_lift_primitive(self, delta_z_mm: float, steps: int = 30, dt: float = 0.02):
+        """Lift the end-effector by delta_z_mm using differential IK.
+
+        Breaks the motion into small steps for safety.
+        """
+        import time
+        from async_dp_v8.control.kinematics import ik_delta_z
+
+        obs = self.get_observation()
+        current_qpos = obs["qpos"].copy()
+
+        # Convert mm to meters, divide into steps
+        delta_z_m = delta_z_mm / 1000.0
+        step_z = delta_z_m / steps
+
+        for i in range(steps):
+            # Compute joint delta for this small Z step
+            dq = ik_delta_z(current_qpos, step_z)
+            target = current_qpos + dq
+
+            # Safety clamp
+            if self.safety:
+                target, _, _ = self.safety.check_and_clamp_command(target, current_qpos)
+
+            # Send to motors
+            motor_positions = self._joints_to_motors(target)
+            for j, motor_id in enumerate(self.dxl.ids[:len(motor_positions)]):
+                self.dxl.goal_position_rad(motor_id, motor_positions[j])
+
+            current_qpos = target
+            time.sleep(dt)
+
+        logger.info(f"Lift primitive completed: {delta_z_mm}mm in {steps} steps")
 
     def _motors_to_joints(self, motor_vals: np.ndarray) -> np.ndarray:
         """Convert motor-level values to joint-level using JOINT_MAP.

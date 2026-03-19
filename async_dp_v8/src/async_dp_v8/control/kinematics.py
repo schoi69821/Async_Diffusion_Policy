@@ -60,6 +60,41 @@ def rotation_to_euler(R: np.ndarray) -> np.ndarray:
     return np.array([x, y, z])
 
 
+def compute_jacobian(qpos: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+    """Compute 3x6 position Jacobian via finite differences.
+
+    Returns: [3, 6] matrix mapping joint velocities to EE linear velocity.
+    """
+    J = np.zeros((3, 6))
+    pos0, _ = forward_kinematics(qpos)
+    for i in range(6):
+        q_perturbed = qpos.copy()
+        q_perturbed[i] += eps
+        pos_perturbed, _ = forward_kinematics(q_perturbed)
+        J[:, i] = (pos_perturbed - pos0) / eps
+    return J
+
+
+def ik_delta_z(qpos: np.ndarray, delta_z_m: float, damping: float = 0.01) -> np.ndarray:
+    """Compute joint delta to achieve a desired EE Z displacement.
+
+    Uses damped least-squares (Jacobian pseudoinverse) for robustness.
+
+    qpos: [6] current joint angles
+    delta_z_m: desired Z displacement in meters
+    damping: regularization factor
+    Returns: [6] joint angle deltas
+    """
+    J = compute_jacobian(qpos)
+    # We only care about Z (row 2 of Jacobian)
+    Jz = J[2:3, :]  # [1, 6]
+
+    # Damped pseudoinverse: J^T (J J^T + lambda^2 I)^-1
+    JJT = Jz @ Jz.T + damping ** 2 * np.eye(1)
+    dq = Jz.T @ np.linalg.solve(JJT, np.array([[delta_z_m]]))
+    return dq.flatten()
+
+
 def qpos_to_ee_pose(qpos: np.ndarray) -> np.ndarray:
     """Convert joint positions to 7D ee pose [x, y, z, roll, pitch, yaw, grip_dummy].
 
