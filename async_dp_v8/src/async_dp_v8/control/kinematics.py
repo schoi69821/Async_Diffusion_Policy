@@ -3,11 +3,16 @@ import numpy as np
 from typing import Tuple
 
 
-# VX300s DH parameters (approximate)
+# VX300s DH parameters (modified DH convention, approximate).
+# Derived from Interbotix VX300s URDF — verify against actual URDF if precision matters.
+#   d[0] = 0.0727  base-to-shoulder height
+#   a[1] = 0.300   upper arm length (shoulder to elbow)
+#   a[2] = 0.300   forearm length (elbow to wrist)
+#   d[5] = 0.065   gripper offset (wrist_rotate to ee)
 VX300S_DH = {
     "a": [0, 0.300, 0.300, 0, 0, 0],
     "alpha": [-np.pi / 2, 0, 0, -np.pi / 2, np.pi / 2, 0],
-    "d": [0.089159, 0, 0, 0, 0.109, 0.082],
+    "d": [0.0727, 0, 0, 0, 0, 0.065],
 }
 
 
