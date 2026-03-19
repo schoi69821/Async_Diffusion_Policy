@@ -5,19 +5,26 @@ from async_dp_v8.data.relabel_contact import ContactRelabeler, ContactLabelConfi
 
 
 def _make_df(n=100):
-    """Create synthetic gripper data with a clear contact event at frame 50."""
+    """Create synthetic gripper data with a clear contact event at frame 50.
+
+    The contact labeler uses:
+      current_score = clip((diff(current) - 35) / 50, 0, 1)  -- needs large current *jumps*
+      vel_score     = clip((-vel - 0.05) / 0.20, 0, 1)       -- needs vel < -0.05
+    So "before contact": vel ~0 (idle), current flat.
+       "during/after contact": vel negative (pressing), current rising sharply.
+    """
     df = pd.DataFrame({
         "gripper_current": np.concatenate([
-            np.zeros(50),
-            np.linspace(0, 200, 50),  # current ramps up during contact
+            np.zeros(50),                       # flat (no current jumps)
+            np.cumsum(np.full(50, 5.0)),        # steadily rising -> diff=5 per step
         ]),
         "gripper_vel": np.concatenate([
-            np.full(50, -0.3),  # closing
-            np.full(50, 0.0),   # stalled (contact)
+            np.full(50, 0.0),                   # idle (vel_score = 0)
+            np.full(50, -0.3),                  # pressing (vel_score ~1)
         ]),
         "gripper_pos_rad": np.concatenate([
             np.linspace(-0.5, -1.0, 50),
-            np.full(50, -1.05),  # closed
+            np.full(50, -1.05),                 # closed
         ]),
     })
     return df
