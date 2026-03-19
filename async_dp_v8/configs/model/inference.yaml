@@ -1,0 +1,14 @@
+obs_horizon: 3
+pred_horizon: 12
+execute_horizon: 4
+control_hz: 15
+close_prob_thresh: 0.80
+open_prob_thresh: 0.80
+contact_prob_thresh: 0.55
+contact_current_delta_thresh: 35.0
+grip_commit_consecutive: 2
+lift_delta_z_mm: 20.0
+lift_target_z_mm: 35.0
+max_joint_step_rad: 0.12
+chunk_blend_alpha: 0.6
+num_diffusion_steps: 100

@@ -1,0 +1,16 @@
+vision:
+  type: resnet18
+  pretrained: true
+  freeze_until: layer3
+  out_dim: 256
+
+crop:
+  channels: [32, 64, 128]
+  kernel_size: 3
+  out_dim: 128
+
+proprio:
+  hidden_dim: 256
+  out_dim: 128
+  norm: layernorm
+  activation: gelu

@@ -1,0 +1,9 @@
+lambda_arm: 1.0
+lambda_phase: 0.4
+lambda_grip: 0.8
+lambda_contact: 0.3
+lambda_smooth: 0.05
+lambda_cons: 0.10
+phase_label_smoothing: 0.05
+grip_focal_gamma: 2.0
+contact_pos_weight: 2.0

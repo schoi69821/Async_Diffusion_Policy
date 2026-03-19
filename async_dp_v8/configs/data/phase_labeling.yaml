@@ -1,0 +1,14 @@
+align_xy_thresh_mm: 12.0
+pregrasp_z_margin_mm: 25.0
+close_vel_thresh: -0.15
+current_rise_thresh: 35.0
+lift_dz_thresh_mm: 10.0
+home_dist_thresh_mm: 30.0
+min_phase_len: 3
+phases:
+  - reach
+  - align
+  - close
+  - lift
+  - place
+  - return

@@ -1,0 +1,12 @@
+obs_horizon: 3
+pred_horizon: 12
+execute_horizon: 4
+image_size: [224, 224]
+crop_size: [96, 96]
+use_crop: true
+action_dim: 6
+num_joints: 6
+num_motors: 7
+train_ratio: 0.85
+val_ratio: 0.10
+test_ratio: 0.05
