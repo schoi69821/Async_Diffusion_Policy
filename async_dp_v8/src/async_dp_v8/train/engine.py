@@ -62,9 +62,11 @@ class TrainingEngine:
         self.use_amp = use_amp and device == "cuda"
         self.scaler = torch.amp.GradScaler("cuda") if self.use_amp else None
         self.ema = EMAModel(model, decay=ema_decay)
+        self._prev_pred_x0 = None
 
     def train_one_epoch(self, loader: DataLoader) -> Dict[str, float]:
         self.model.train()
+        self._prev_pred_x0 = None
         meters = {}
         count = 0
 
@@ -87,14 +89,23 @@ class TrainingEngine:
                 out = self.model(batch, noisy_actions=noisy_actions, timestep=timesteps)
                 pred_noise = out["pred_noise"]
 
+                # Reconstruct predicted clean actions (with gradients for smoothness regularization)
+                alpha_t = self.scheduler.alphas_cumprod[timesteps]
+                while alpha_t.dim() < noisy_actions.dim():
+                    alpha_t = alpha_t.unsqueeze(-1)
+                pred_x0 = (noisy_actions - (1 - alpha_t).sqrt() * pred_noise) / alpha_t.sqrt()
+
                 losses = compute_losses(
                     batch=batch,
                     out=out,
                     pred_noise=pred_noise,
                     true_noise=noise,
-                    arm_chunk_pred=target_actions,
+                    arm_chunk_pred=pred_x0,
                     mask=mask,
+                    prev_chunk=self._prev_pred_x0,
                 )
+
+            self._prev_pred_x0 = pred_x0.detach()
 
             self.optimizer.zero_grad(set_to_none=True)
             if self.scaler is not None:
@@ -143,11 +154,18 @@ class TrainingEngine:
             out = self.model(batch, noisy_actions=noisy_actions, timestep=timesteps)
             pred_noise = out["pred_noise"]
 
+            # Reconstruct predicted clean actions for smoothness evaluation
+            alpha_t = self.scheduler.alphas_cumprod[timesteps]
+            while alpha_t.dim() < noisy_actions.dim():
+                alpha_t = alpha_t.unsqueeze(-1)
+            pred_x0 = (noisy_actions - (1 - alpha_t).sqrt() * pred_noise) / alpha_t.sqrt()
+
             losses = compute_losses(
                 batch=batch,
                 out=out,
                 pred_noise=pred_noise,
                 true_noise=noise,
+                arm_chunk_pred=pred_x0,
                 mask=mask,
             )
 

@@ -26,6 +26,20 @@ class Normalizer:
         return data * std + mean
 
     @classmethod
+    def fit(cls, data_dict: Dict[str, np.ndarray]) -> "Normalizer":
+        """Compute normalization stats from data arrays.
+
+        data_dict: {"key": np.ndarray of shape [N, D]}
+        """
+        stats = {}
+        for key, data in data_dict.items():
+            stats[key] = {
+                "mean": data.mean(axis=0).astype(np.float32),
+                "std": data.std(axis=0).astype(np.float32),
+            }
+        return cls(stats)
+
+    @classmethod
     def from_json(cls, path: str) -> "Normalizer":
         with open(path, "r") as f:
             raw = json.load(f)

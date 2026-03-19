@@ -6,6 +6,7 @@ from typing import Dict, Optional
 from .diffusion_loss import diffusion_mse_loss
 from .focal_loss import focal_cross_entropy
 from .smoothness_loss import smoothness_loss
+from .consistency_loss import chunk_consistency_loss
 
 
 def compute_losses(
@@ -15,13 +16,17 @@ def compute_losses(
     true_noise: torch.Tensor,
     arm_chunk_pred: Optional[torch.Tensor] = None,
     mask: Optional[torch.Tensor] = None,
+    prev_chunk: Optional[torch.Tensor] = None,
     lambda_arm: float = 1.0,
     lambda_phase: float = 0.4,
     lambda_grip: float = 0.8,
     lambda_contact: float = 0.3,
     lambda_smooth: float = 0.05,
+    lambda_cons: float = 0.10,
     grip_focal_gamma: float = 2.0,
+    phase_focal_gamma: float = 1.5,
     phase_label_smoothing: float = 0.05,
+    contact_pos_weight: float = 2.0,
 ) -> Dict[str, torch.Tensor]:
     losses = {}
 
@@ -32,7 +37,7 @@ def compute_losses(
     losses["phase_ce"] = focal_cross_entropy(
         out["phase_logits"],
         batch["target_phase_next"].long(),
-        gamma=grip_focal_gamma,
+        gamma=phase_focal_gamma,
         label_smoothing=phase_label_smoothing,
     )
 
@@ -47,6 +52,7 @@ def compute_losses(
     losses["contact_bce"] = F.binary_cross_entropy_with_logits(
         out["contact_logit"].squeeze(-1),
         batch["target_contact"].float(),
+        pos_weight=torch.tensor(contact_pos_weight, device=pred_noise.device),
     )
 
     # Smoothness
@@ -55,6 +61,14 @@ def compute_losses(
     else:
         losses["smooth"] = torch.tensor(0.0, device=pred_noise.device)
 
+    # Consistency loss
+    if prev_chunk is not None and arm_chunk_pred is not None:
+        execute_horizon = 4  # from constants
+        overlap = arm_chunk_pred.shape[1] - execute_horizon
+        losses["consistency"] = chunk_consistency_loss(prev_chunk, arm_chunk_pred, overlap)
+    else:
+        losses["consistency"] = torch.tensor(0.0, device=pred_noise.device)
+
     # Total
     total = (
         lambda_arm * losses["arm_diff"]
@@ -62,6 +76,7 @@ def compute_losses(
         + lambda_grip * losses["grip_ce"]
         + lambda_contact * losses["contact_bce"]
         + lambda_smooth * losses["smooth"]
+        + lambda_cons * losses["consistency"]
     )
     losses["total"] = total
     return losses

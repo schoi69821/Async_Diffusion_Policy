@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=12)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--stats", default="data/interim/stats.json")
     parser.add_argument("--checkpoint-dir", default="checkpoints/hybrid_policy_v8")
     parser.add_argument("--save-every", type=int, default=10)
     parser.add_argument("--val-every", type=int, default=5)
@@ -43,7 +44,7 @@ def main():
 
     # Data
     train_index = pd.read_parquet(args.index)
-    train_ds = AsyncDPv8Dataset(data_dir=args.data_dir, index_df=train_index)
+    train_ds = AsyncDPv8Dataset(data_dir=args.data_dir, index_df=train_index, stats_path=args.stats)
     sampler = PhaseBalancedSampler(train_index)
     train_loader = DataLoader(
         train_ds,
@@ -58,7 +59,7 @@ def main():
     val_loader = None
     if Path(args.val_index).exists():
         val_index = pd.read_parquet(args.val_index)
-        val_ds = AsyncDPv8Dataset(data_dir=args.data_dir, index_df=val_index)
+        val_ds = AsyncDPv8Dataset(data_dir=args.data_dir, index_df=val_index, stats_path=args.stats)
         val_loader = DataLoader(
             val_ds,
             batch_size=args.batch_size,

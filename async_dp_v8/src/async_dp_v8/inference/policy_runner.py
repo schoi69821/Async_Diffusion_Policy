@@ -6,6 +6,8 @@ import logging
 
 from .state_machine import State, RuntimeContext
 from async_dp_v8.control.chunk_blender import ChunkBlender
+from async_dp_v8.control.action_postprocess import clip_joint_step, denormalize_actions
+from async_dp_v8.utils.normalization import Normalizer
 from async_dp_v8.types import InferenceConfig
 
 logger = logging.getLogger(__name__)
@@ -37,11 +39,15 @@ class PolicyRunnerV8:
             alpha=0.6,
         )
         self._noise_scheduler = None
+        self._normalizer: Optional[Normalizer] = None
         self._current_chunk: Optional[np.ndarray] = None
         self._chunk_step: int = 0
 
     def set_noise_scheduler(self, scheduler):
         self._noise_scheduler = scheduler
+
+    def set_normalizer(self, normalizer: Normalizer):
+        self._normalizer = normalizer
 
     @torch.no_grad()
     def step(self, obs_batch: Dict[str, torch.Tensor]) -> Tuple[dict, dict]:
@@ -116,6 +122,9 @@ class PolicyRunnerV8:
             arm_chunk = noisy_actions - out.get("pred_noise", noisy_actions)
 
         arm_np = arm_chunk[0].cpu().numpy()
+        # Denormalize actions from training distribution
+        if self._normalizer is not None:
+            arm_np = self._normalizer.denormalize("action_arm", arm_np)
         arm_np = self.chunk_blender.blend(arm_np)
         self._current_chunk = arm_np
         self._chunk_step = 0
@@ -269,6 +278,15 @@ class PolicyRunnerV8:
             return None
         action = self._current_chunk[self._chunk_step]
         self._chunk_step += 1
+
+        # Clip joint step for safety
+        current_qpos = self.robot._last_state.get("qpos", np.zeros(6))
+        action = clip_joint_step(
+            action.reshape(1, -1),
+            current_qpos,
+            max_step_rad=self.cfg.max_joint_step_rad,
+        )[0]
+
         return action
 
     def reset(self):

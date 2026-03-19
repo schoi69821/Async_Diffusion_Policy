@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Compute dataset statistics for normalization."""
 import argparse
-import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
 
 from async_dp_v8.constants import NUM_JOINTS, NUM_MOTORS
+from async_dp_v8.utils.normalization import Normalizer
 
 
 def main():
@@ -24,7 +24,6 @@ def main():
         return
     df = pd.concat(all_dfs, ignore_index=True)
 
-    stats = {}
     field_groups = {
         "qpos": [f"qpos_{i}" for i in range(NUM_JOINTS)],
         "qvel": [f"qvel_{i}" for i in range(NUM_JOINTS)],
@@ -35,20 +34,16 @@ def main():
         "action_arm": [f"action_arm_{i}" for i in range(NUM_JOINTS)],
     }
 
+    data_dict = {}
     for key, cols in field_groups.items():
         available = [c for c in cols if c in df.columns]
         if available:
-            vals = df[available].to_numpy()
-            stats[key] = {
-                "mean": vals.mean(axis=0).tolist(),
-                "std": vals.std(axis=0).tolist(),
-                "min": vals.min(axis=0).tolist(),
-                "max": vals.max(axis=0).tolist(),
-            }
+            data_dict[key] = df[available].to_numpy().astype(np.float32)
+
+    normalizer = Normalizer.fit(data_dict)
 
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    with open(args.output, "w") as f:
-        json.dump(stats, f, indent=2)
+    normalizer.to_json(args.output)
     print(f"Stats saved to {args.output}")
 
 

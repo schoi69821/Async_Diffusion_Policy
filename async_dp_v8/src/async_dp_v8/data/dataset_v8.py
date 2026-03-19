@@ -6,11 +6,15 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import cv2
+import logging
 
 from async_dp_v8.constants import (
     OBS_HORIZON, PRED_HORIZON, NUM_JOINTS, NUM_MOTORS,
     IMAGE_SIZE, CROP_SIZE,
 )
+from async_dp_v8.utils.normalization import Normalizer
+
+logger = logging.getLogger(__name__)
 
 
 class AsyncDPv8Dataset(Dataset):
@@ -24,6 +28,7 @@ class AsyncDPv8Dataset(Dataset):
         crop_size: tuple = CROP_SIZE,
         use_crop: bool = True,
         transform=None,
+        stats_path: str = None,
     ):
         self.data_dir = Path(data_dir)
         self.df = index_df.reset_index(drop=True)
@@ -34,8 +39,16 @@ class AsyncDPv8Dataset(Dataset):
         self.use_crop = use_crop
         self.transform = transform
 
-        # Build episode lookup
+        # Normalization
+        self.normalizer = None
+        if stats_path and Path(stats_path).exists():
+            self.normalizer = Normalizer.from_json(stats_path)
+            logger.info(f"Loaded normalization stats from {stats_path}")
+
+        # Episode cache with LRU limit
         self._episode_cache: Dict[str, pd.DataFrame] = {}
+        self._cache_order: list = []
+        self._max_cache_size: int = 50
 
     def __len__(self) -> int:
         return len(self.df)
@@ -72,7 +85,20 @@ class AsyncDPv8Dataset(Dataset):
         if episode_id not in self._episode_cache:
             path = self.data_dir / f"{episode_id}.parquet"
             self._episode_cache[episode_id] = pd.read_parquet(path)
+            self._cache_order.append(episode_id)
+            # Evict oldest if cache is full
+            while len(self._cache_order) > self._max_cache_size:
+                oldest = self._cache_order.pop(0)
+                self._episode_cache.pop(oldest, None)
         return self._episode_cache[episode_id]
+
+    def _normalize(self, key: str, tensor: torch.Tensor) -> torch.Tensor:
+        """Normalize tensor using stored stats if available."""
+        if self.normalizer is None:
+            return tensor
+        np_val = tensor.numpy()
+        np_normed = self.normalizer.normalize(key, np_val)
+        return torch.from_numpy(np_normed).float()
 
     def _load_obs_window(self, ep_df: pd.DataFrame, frame_idx: int) -> Dict[str, torch.Tensor]:
         T = self.obs_horizon
@@ -127,6 +153,14 @@ class AsyncDPv8Dataset(Dataset):
             "contact": torch.tensor(contact_list, dtype=torch.float32),
         }
 
+        # Apply normalization
+        obs["qpos"] = self._normalize("qpos", obs["qpos"])
+        obs["qvel"] = self._normalize("qvel", obs["qvel"])
+        obs["ee_pose"] = self._normalize("ee_pose", obs["ee_pose"])
+        obs["gripper"] = self._normalize("gripper", obs["gripper"])
+        obs["current"] = self._normalize("current", obs["current"])
+        obs["pwm"] = self._normalize("pwm", obs["pwm"])
+
         if self.transform is not None:
             obs["image_wrist"] = self.transform(obs["image_wrist"])
             obs["image_crop"] = self.transform(obs["image_crop"])
@@ -153,8 +187,11 @@ class AsyncDPv8Dataset(Dataset):
         next_idx = min(frame_idx + 1, max_idx)
         next_row = ep_df.iloc[next_idx]
 
+        arm_chunk = torch.stack(arm_chunks)
+        arm_chunk = self._normalize("action_arm", arm_chunk)
+
         return {
-            "arm_chunk": torch.stack(arm_chunks),
+            "arm_chunk": arm_chunk,
             "mask": torch.tensor(mask, dtype=torch.float32),
             "phase_next": torch.tensor(int(next_row.get("phase", 0)), dtype=torch.long),
             "grip_token": torch.tensor(int(next_row.get("grip_token", 1)), dtype=torch.long),
@@ -168,6 +205,8 @@ class AsyncDPv8Dataset(Dataset):
             img = cv2.resize(img, size)
             img = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
         else:
+            if path:
+                logger.warning(f"Image not found: {path}")
             img = torch.zeros(3, size[0], size[1])
         return img
 
@@ -182,4 +221,5 @@ class AsyncDPv8Dataset(Dataset):
             if isinstance(val, (list, np.ndarray)):
                 return torch.tensor(val, dtype=torch.float32)
 
+        logger.debug(f"Missing data for '{prefix}', using zeros (dim={dim})")
         return torch.zeros(dim, dtype=torch.float32)
