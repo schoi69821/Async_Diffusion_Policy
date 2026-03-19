@@ -81,7 +81,7 @@ JOINT_LIMITS_RAD = np.array([
     [-2.0944, +2.0944],  # forearm_roll
     [-1.7453, +1.9199],  # wrist_angle
     [-1.5708, +1.5708],  # wrist_rotate
-    [-1.3963, +0.1745],  # gripper
+    [-1.5708, +0.1745],  # gripper (must cover FOLLOWER_MIN=1050 → -1.53 rad)
 ], dtype=np.float32)
 
 IMG_SIZE = 224
@@ -148,6 +148,31 @@ class ArmDriver:
         for mid in ALL_MOTOR_IDS:
             self.pkt.write4ByteTxRx(self.port, mid, ADDR_PROFILE_VELOCITY, velocity)
             self.pkt.write4ByteTxRx(self.port, mid, ADDR_PROFILE_ACCELERATION, acceleration)
+
+    def check_hardware_errors(self) -> dict:
+        """Read Hardware Error Status (addr 70) for all motors. Returns {motor_id: error_byte}."""
+        ADDR_HW_ERROR = 70
+        errors = {}
+        for mid in ALL_MOTOR_IDS:
+            val, result, _ = self.pkt.read1ByteTxRx(self.port, mid, ADDR_HW_ERROR)
+            if result == COMM_SUCCESS and val != 0:
+                errors[mid] = val
+                err_names = []
+                if val & 0x01: err_names.append("InputVoltage")
+                if val & 0x04: err_names.append("Overheating")
+                if val & 0x08: err_names.append("MotorEncoder")
+                if val & 0x10: err_names.append("ElectricalShock")
+                if val & 0x20: err_names.append("Overload")
+                logger.warning(f"[{self.name}] Motor {mid} HW error: {'+'.join(err_names)} (0x{val:02X})")
+        return errors
+
+    def clear_errors_and_reboot(self, motor_ids: list = None):
+        """Reboot motors to clear hardware errors. Torque will be off after reboot."""
+        targets = motor_ids or ALL_MOTOR_IDS
+        for mid in targets:
+            self.pkt.reboot(self.port, mid)
+            logger.info(f"[{self.name}] Rebooted motor {mid}")
+        time.sleep(0.5)  # Wait for reboot
 
     def read_joints(self) -> np.ndarray:
         """Read 7 joint positions (radians) via position-only SyncRead."""
@@ -286,6 +311,17 @@ def collect_episode(
     """
     dt = 1.0 / freq
 
+    # Check and clear any hardware errors before starting
+    errors = follower.check_hardware_errors()
+    if errors:
+        logger.warning(f"Hardware errors detected on motors {list(errors.keys())}, rebooting...")
+        follower.clear_errors_and_reboot(list(errors.keys()))
+        # Re-check after reboot
+        errors = follower.check_hardware_errors()
+        if errors:
+            logger.error(f"Errors persist after reboot: {errors}")
+            raise RuntimeError("Cannot start episode: motor hardware errors")
+
     # Read leader position, set follower
     initial = leader.read_joints()
     follower.set_torque(False)
@@ -352,13 +388,28 @@ def collect_episode(
             if camera is not None:
                 image_list.append(camera.grab())
 
-            # Progress display
+            # Progress display + gripper health check
             step = len(timestamps)
             if step % 30 == 0:
-                grip = joints_pos[GRIPPER_IDX]
+                grip_cmd = follower_joints[GRIPPER_IDX]
+                grip_actual = joints_pos[GRIPPER_IDX]
                 grip_cur = joints_cur[GRIPPER_IDX]
+                grip_err = abs(grip_cmd - grip_actual)
                 print(f"\r  Step {step:4d} | t={t_now:.1f}s | "
-                      f"grip={grip:.3f} | grip_cur={grip_cur:.0f}mA", end="", flush=True)
+                      f"grip_cmd={grip_cmd:.3f} grip_act={grip_actual:.3f} "
+                      f"err={grip_err:.3f} cur={grip_cur:.0f}mA", end="", flush=True)
+
+                # Warn if gripper isn't tracking commands
+                if grip_err > 0.3 and step > 60:
+                    logger.warning(f"\n  Gripper tracking error high: {grip_err:.3f} rad. "
+                                   f"Possible motor error. Checking...")
+                    errors = follower.check_hardware_errors()
+                    if errors:
+                        logger.warning(f"  Motor errors: {errors}. Rebooting affected motors...")
+                        follower.set_torque(False)
+                        follower.clear_errors_and_reboot(list(errors.keys()))
+                        follower.set_profile(velocity=150, acceleration=80)
+                        follower.set_torque(True)
 
             # Rate control
             elapsed = time.perf_counter() - t0
