@@ -15,6 +15,7 @@ from async_dp_v8.data.samplers import PhaseBalancedSampler
 from async_dp_v8.train.engine import TrainingEngine, NoiseScheduler
 from async_dp_v8.train.hooks import TrainingHooks
 from async_dp_v8.utils.checkpointing import save_checkpoint
+from async_dp_v8.utils.config import load_config, get_loss_weights
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,7 +33,13 @@ def main():
     parser.add_argument("--checkpoint-dir", default="checkpoints/hybrid_policy_v8")
     parser.add_argument("--save-every", type=int, default=10)
     parser.add_argument("--val-every", type=int, default=5)
+    parser.add_argument("--config-dir", default="configs")
     args = parser.parse_args()
+
+    # Load config
+    config = load_config(args.config_dir)
+    loss_weights = get_loss_weights(config)
+    logger.info(f"Loss weights: {loss_weights}")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Using device: {device}")
@@ -70,7 +77,7 @@ def main():
         )
 
     # Training
-    engine = TrainingEngine(model, optimizer, scheduler, device=device)
+    engine = TrainingEngine(model, optimizer, scheduler, device=device, loss_kwargs=loss_weights)
     hooks = TrainingHooks()
 
     best_val_loss = float("inf")

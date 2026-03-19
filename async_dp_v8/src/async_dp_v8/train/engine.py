@@ -53,6 +53,7 @@ class TrainingEngine:
         grad_clip: float = 1.0,
         use_amp: bool = True,
         ema_decay: float = 0.995,
+        loss_kwargs: Optional[Dict[str, float]] = None,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -62,6 +63,7 @@ class TrainingEngine:
         self.use_amp = use_amp and device == "cuda"
         self.scaler = torch.amp.GradScaler("cuda") if self.use_amp else None
         self.ema = EMAModel(model, decay=ema_decay)
+        self.loss_kwargs = loss_kwargs or {}
         self._prev_pred_x0 = None
 
     def train_one_epoch(self, loader: DataLoader) -> Dict[str, float]:
@@ -103,6 +105,7 @@ class TrainingEngine:
                     arm_chunk_pred=pred_x0,
                     mask=mask,
                     prev_chunk=self._prev_pred_x0,
+                    **self.loss_kwargs,
                 )
 
             self._prev_pred_x0 = pred_x0.detach()
@@ -167,6 +170,7 @@ class TrainingEngine:
                 true_noise=noise,
                 arm_chunk_pred=pred_x0,
                 mask=mask,
+                **self.loss_kwargs,
             )
 
             for k, v in losses.items():
