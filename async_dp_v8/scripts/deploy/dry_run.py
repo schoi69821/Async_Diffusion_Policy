@@ -151,11 +151,14 @@ def main():
         # 6. FK validation
         print("\n[6/8] Forward Kinematics")
         ee_pos = obs["ee_pose"][:3]
-        result.check("EE Z > 0 (above base)", ee_pos[2] > 0,
-                      f"z={ee_pos[2]*1000:.1f}mm")
         ee_dist = np.linalg.norm(ee_pos)
         result.check("EE distance reasonable (0.05-0.8m)", 0.05 < ee_dist < 0.8,
                       f"dist={ee_dist:.3f}m")
+        result.check("EE Z plausible (abs < 0.6m)", abs(ee_pos[2]) < 0.6,
+                      f"z={ee_pos[2]*1000:.1f}mm")
+        if ee_pos[2] < 0:
+            print(f"  NOTE: EE Z is negative ({ee_pos[2]*1000:.0f}mm) - "
+                  f"expected if arm is hanging with torque OFF")
 
         # 7. Safety guard
         print("\n[7/8] Safety Guard")

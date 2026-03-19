@@ -1,47 +1,87 @@
-"""Forward kinematics for VX300s arm."""
+"""Forward kinematics for Interbotix VX300s 6DOF arm.
+
+Uses URDF-derived transform chain instead of DH convention for accuracy.
+
+VX300s 6DOF joint chain:
+  1. waist:        Z rotation, origin [0, 0, 0.07285] from base
+  2. shoulder:     Y rotation, origin [0.04825, 0, 0.04805] from waist
+  3. elbow:        Y rotation, origin [0.3, 0, 0] from shoulder (upper arm)
+  4. forearm_roll: X rotation, origin [0, 0, 0] from elbow
+  5. wrist_angle:  Y rotation, origin [0.3, 0, 0] from forearm (forearm length)
+  6. wrist_rotate: X rotation, origin [0.065, 0, 0] from wrist (to EE)
+"""
 import numpy as np
 from typing import Tuple
 
 
-# VX300s DH parameters (modified DH convention, approximate).
-# Derived from Interbotix VX300s URDF — verify against actual URDF if precision matters.
-#   d[0] = 0.0727  base-to-shoulder height
-#   a[1] = 0.300   upper arm length (shoulder to elbow)
-#   a[2] = 0.300   forearm length (elbow to wrist)
-#   d[5] = 0.065   gripper offset (wrist_rotate to ee)
-VX300S_DH = {
-    "a": [0, 0.300, 0.300, 0, 0, 0],
-    "alpha": [-np.pi / 2, 0, 0, -np.pi / 2, np.pi / 2, 0],
-    "d": [0.0727, 0, 0, 0, 0, 0.065],
-}
+# Link offsets from Interbotix VX300s URDF (meters)
+LINK_OFFSETS = [
+    np.array([0.0, 0.0, 0.07285]),     # base to waist
+    np.array([0.04825, 0.0, 0.04805]),  # waist to shoulder
+    np.array([0.300, 0.0, 0.0]),        # shoulder to elbow (upper arm)
+    np.array([0.0, 0.0, 0.0]),          # elbow to forearm_roll (coincident)
+    np.array([0.300, 0.0, 0.0]),        # forearm_roll to wrist (forearm)
+    np.array([0.065, 0.0, 0.0]),        # wrist to EE (gripper offset)
+]
+
+# Joint axes: 'z', 'y', 'y', 'x', 'y', 'x'
+JOINT_AXES = ['z', 'y', 'y', 'x', 'y', 'x']
 
 
-def dh_matrix(a: float, alpha: float, d: float, theta: float) -> np.ndarray:
-    """Compute 4x4 DH transformation matrix."""
-    ct, st = np.cos(theta), np.sin(theta)
-    ca, sa = np.cos(alpha), np.sin(alpha)
+def _rot_x(theta: float) -> np.ndarray:
+    c, s = np.cos(theta), np.sin(theta)
     return np.array([
-        [ct, -st * ca, st * sa, a * ct],
-        [st, ct * ca, -ct * sa, a * st],
-        [0, sa, ca, d],
-        [0, 0, 0, 1],
+        [1, 0, 0],
+        [0, c, -s],
+        [0, s, c],
     ])
+
+
+def _rot_y(theta: float) -> np.ndarray:
+    c, s = np.cos(theta), np.sin(theta)
+    return np.array([
+        [c, 0, s],
+        [0, 1, 0],
+        [-s, 0, c],
+    ])
+
+
+def _rot_z(theta: float) -> np.ndarray:
+    c, s = np.cos(theta), np.sin(theta)
+    return np.array([
+        [c, -s, 0],
+        [s, c, 0],
+        [0, 0, 1],
+    ])
+
+
+_ROT_FN = {'x': _rot_x, 'y': _rot_y, 'z': _rot_z}
+
+
+def _make_tf(rot: np.ndarray, trans: np.ndarray) -> np.ndarray:
+    """Create 4x4 homogeneous transform from 3x3 rotation and 3D translation."""
+    T = np.eye(4)
+    T[:3, :3] = rot
+    T[:3, 3] = trans
+    return T
 
 
 def forward_kinematics(qpos: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Compute end-effector position and rotation matrix from joint angles.
+
+    Uses the Interbotix VX300s URDF-derived transform chain.
 
     qpos: [6] joint angles in radians
     Returns: (pos [3], rot [3, 3])
     """
     T = np.eye(4)
     for i in range(6):
-        T = T @ dh_matrix(
-            VX300S_DH["a"][i],
-            VX300S_DH["alpha"][i],
-            VX300S_DH["d"][i],
-            qpos[i],
-        )
+        # Translate to joint origin
+        T = T @ _make_tf(np.eye(3), LINK_OFFSETS[i])
+        # Rotate around joint axis
+        rot_fn = _ROT_FN[JOINT_AXES[i]]
+        T = T @ _make_tf(rot_fn(qpos[i]), np.zeros(3))
+
     return T[:3, 3], T[:3, :3]
 
 
