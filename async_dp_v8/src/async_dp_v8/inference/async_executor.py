@@ -15,6 +15,7 @@ class AsyncExecutor:
         self.policy_runner = policy_runner
         self.control_freq = control_freq
         self.inference_freq = inference_freq
+        self.max_stale_ticks = control_freq  # 1 second of staleness
 
         self._current_actions: Optional[np.ndarray] = None
         self._action_index: int = 0
@@ -22,9 +23,12 @@ class AsyncExecutor:
         self._running = False
         self._inference_thread: Optional[threading.Thread] = None
         self._last_info: Dict = {}
+        self._last_update_tick: int = 0
+        self._tick_counter: int = 0
 
     def start(self):
         self._running = True
+        self._tick_counter = 0
         self._inference_thread = threading.Thread(target=self._inference_loop, daemon=True)
         self._inference_thread.start()
         logger.info("AsyncExecutor started")
@@ -33,13 +37,24 @@ class AsyncExecutor:
         self._running = False
         if self._inference_thread is not None:
             self._inference_thread.join(timeout=2.0)
+        with self._lock:
+            self._current_actions = None
+            self._action_index = 0
         logger.info("AsyncExecutor stopped")
 
     def get_action(self) -> Optional[np.ndarray]:
         """Get next action for control loop. Called at control_freq."""
+        self._tick_counter += 1
         with self._lock:
             if self._current_actions is None:
                 return None
+
+            # Staleness check
+            if self._tick_counter - self._last_update_tick > self.max_stale_ticks:
+                logger.warning("Actions are stale, returning None")
+                self._current_actions = None
+                return None
+
             if self._action_index >= len(self._current_actions):
                 return self._current_actions[-1]  # Hold last action
             action = self._current_actions[self._action_index]
@@ -52,7 +67,6 @@ class AsyncExecutor:
             t0 = time.monotonic()
             try:
                 obs = self.policy_runner.robot.get_observation()
-                # Convert to batch format (would need proper tensor conversion)
                 cmd, info = self.policy_runner.step(obs)
                 self._last_info = info
 
@@ -60,8 +74,18 @@ class AsyncExecutor:
                     if cmd.get("arm_actions") is not None:
                         self._current_actions = cmd["arm_actions"]
                         self._action_index = 0
+                        self._last_update_tick = self._tick_counter
+
             except Exception as e:
                 logger.error(f"Inference error: {e}")
+                # Check if it's a critical hardware error
+                error_name = type(e).__name__
+                if error_name == "DxlReadError" or "read" in str(e).lower():
+                    logger.critical(f"Hardware read failure, triggering E-STOP")
+                    if hasattr(self.policy_runner, '_trigger_estop'):
+                        self.policy_runner._trigger_estop(f"Hardware failure: {e}")
+                    self._running = False
+                    break
 
             elapsed = time.monotonic() - t0
             sleep_time = dt - elapsed
@@ -70,4 +94,4 @@ class AsyncExecutor:
 
     @property
     def info(self) -> Dict:
-        return self._last_info
+        return self._last_info.copy()
