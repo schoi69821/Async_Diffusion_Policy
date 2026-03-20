@@ -27,7 +27,10 @@ from mcp.server.fastmcp import FastMCP
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path("/devAI/taskbotics/Async_Diffusion_Policy/async_dp_v8")
+PROJECT_ROOT = Path(os.environ.get(
+    "MCP_PROJECT_ROOT",
+    str(Path.home() / "devAI" / "taskbotics" / "Async_Diffusion_Policy" / "async_dp_v8"),
+))
 LOG_DIR = PROJECT_ROOT / "logs"
 CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints"
 
