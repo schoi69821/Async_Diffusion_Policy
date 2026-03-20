@@ -4,9 +4,9 @@ import torch.nn as nn
 
 
 class ProprioEncoder(nn.Module):
-    def __init__(self, in_dim: int = 35, out_dim: int = 128):
+    def __init__(self, in_dim: int = 39, out_dim: int = 128):
         super().__init__()
-        # in_dim = 6(qpos) + 6(qvel) + 7(ee_pose) + 2(gripper) + 7(current) + 7(pwm) = 35
+        # in_dim = 6(qpos) + 6(qvel) + 7(ee_pose) + 2(gripper) + 9(current) + 9(pwm) = 39
         self.net = nn.Sequential(
             nn.Linear(in_dim, 256),
             nn.LayerNorm(256),
