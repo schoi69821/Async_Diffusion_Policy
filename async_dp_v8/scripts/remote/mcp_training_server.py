@@ -374,7 +374,9 @@ if __name__ == "__main__":
 
     if args.transport == "sse":
         print(f"Listening on {args.host}:{args.port}", file=sys.stderr)
-        mcp.run(transport="sse", host=args.host, port=args.port)
+        mcp.settings.host = args.host
+        mcp.settings.port = args.port
+        mcp.run(transport="sse")
     else:
         print("Running in stdio mode (for SSH)", file=sys.stderr)
         mcp.run(transport="stdio")
