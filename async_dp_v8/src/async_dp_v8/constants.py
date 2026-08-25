@@ -48,3 +48,8 @@ FOLLOWER_GRIP_MAX = 1965
 
 # Joint map: motor IDs -> logical joints
 JOINT_MAP = [[1], [2, 3], [4, 5], [6], [7], [8], [9]]
+
+# Home position (median of episode start positions from data collection)
+import numpy as np
+HOME_QPOS = np.array([0.0, 1.71, -1.62, 0.0, 0.23, -0.04])
+HOME_TOLERANCE_RAD = 0.35  # generous tolerance for wrist joints

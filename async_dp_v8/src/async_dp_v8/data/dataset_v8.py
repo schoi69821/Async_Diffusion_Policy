@@ -29,6 +29,9 @@ class AsyncDPv8Dataset(Dataset):
         use_crop: bool = True,
         transform=None,
         stats_path: str = None,
+        action_noise_std: float = 0.0,
+        qpos_noise_std: float = 0.0,
+        qvel_noise_std: float = 0.0,
     ):
         self.data_dir = Path(data_dir)
         self.df = index_df.reset_index(drop=True)
@@ -38,6 +41,8 @@ class AsyncDPv8Dataset(Dataset):
         self.crop_size = crop_size
         self.use_crop = use_crop
         self.transform = transform
+        self.qpos_noise_std = qpos_noise_std
+        self.qvel_noise_std = qvel_noise_std
 
         # Normalization
         self.normalizer = None
@@ -153,6 +158,12 @@ class AsyncDPv8Dataset(Dataset):
             "contact": torch.tensor(contact_list, dtype=torch.float32),
         }
 
+        # Apply proprioceptive augmentation (before normalization)
+        if self.qpos_noise_std > 0:
+            obs["qpos"] = obs["qpos"] + torch.randn_like(obs["qpos"]) * self.qpos_noise_std
+        if self.qvel_noise_std > 0:
+            obs["qvel"] = obs["qvel"] + torch.randn_like(obs["qvel"]) * self.qvel_noise_std
+
         # Apply normalization
         obs["qpos"] = self._normalize("qpos", obs["qpos"])
         obs["qvel"] = self._normalize("qvel", obs["qvel"])
@@ -195,7 +206,7 @@ class AsyncDPv8Dataset(Dataset):
             "mask": torch.tensor(mask, dtype=torch.float32),
             "phase_next": torch.tensor(int(next_row.get("phase", 0)), dtype=torch.long),
             "grip_token": torch.tensor(int(next_row.get("grip_token", 1)), dtype=torch.long),
-            "contact": torch.tensor(float(next_row.get("contact_hard", 0)), dtype=torch.float32),
+            "contact": torch.tensor(float(next_row.get("contact_soft", 0.0)), dtype=torch.float32),
         }
 
     def _load_image(self, path: str, size: tuple) -> torch.Tensor:

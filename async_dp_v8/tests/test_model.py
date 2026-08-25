@@ -13,8 +13,8 @@ def test_hybrid_policy_forward():
         "obs_qvel": torch.randn(B, T, 6),
         "obs_ee_pose": torch.randn(B, T, 7),
         "obs_gripper": torch.randn(B, T, 2),
-        "obs_current": torch.randn(B, T, 7),
-        "obs_pwm": torch.randn(B, T, 7),
+        "obs_current": torch.randn(B, T, 9),
+        "obs_pwm": torch.randn(B, T, 9),
     }
     noisy = torch.randn(B, 12, 6)
     timestep = torch.randint(0, 100, (B,))
@@ -40,8 +40,8 @@ def test_hybrid_policy_no_diffusion():
         "obs_qvel": torch.randn(B, T, 6),
         "obs_ee_pose": torch.randn(B, T, 7),
         "obs_gripper": torch.randn(B, T, 2),
-        "obs_current": torch.randn(B, T, 7),
-        "obs_pwm": torch.randn(B, T, 7),
+        "obs_current": torch.randn(B, T, 9),
+        "obs_pwm": torch.randn(B, T, 9),
     }
     out = model(batch)
     assert "pred_noise" not in out

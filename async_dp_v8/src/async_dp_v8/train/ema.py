@@ -38,3 +38,11 @@ class EMAModel:
             if name in self.backup:
                 param.data.copy_(self.backup[name])
         self.backup = {}
+
+    def state_dict(self) -> Dict[str, torch.Tensor]:
+        return {k: v.clone() for k, v in self.shadow.items()}
+
+    def load_state_dict(self, state_dict: Dict[str, torch.Tensor]):
+        for k, v in state_dict.items():
+            if k in self.shadow:
+                self.shadow[k].copy_(v)

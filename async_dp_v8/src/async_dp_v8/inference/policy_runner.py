@@ -5,6 +5,7 @@ from typing import Dict, Optional, Tuple
 import logging
 
 from .state_machine import State, RuntimeContext
+from .ddim_sampler import DDIMSampler
 from async_dp_v8.control.chunk_blender import ChunkBlender
 from async_dp_v8.control.action_postprocess import clip_joint_step, denormalize_actions
 from async_dp_v8.utils.normalization import Normalizer
@@ -43,8 +44,17 @@ class PolicyRunnerV8:
         self._current_chunk: Optional[np.ndarray] = None
         self._chunk_step: int = 0
 
-    def set_noise_scheduler(self, scheduler):
+    def set_noise_scheduler(self, scheduler, ddim_steps: int = 10):
+        """Set noise scheduler and create DDIM sampler for fast inference."""
         self._noise_scheduler = scheduler
+        self._ddim_sampler = DDIMSampler(
+            alphas_cumprod=scheduler.alphas_cumprod,
+            num_train_steps=scheduler.num_steps,
+            num_inference_steps=ddim_steps,
+            eta=0.0,
+        )
+        device = next(self.model.parameters()).device
+        self._ddim_sampler.to(device)
 
     def set_normalizer(self, normalizer: Normalizer):
         self._normalizer = normalizer
@@ -112,11 +122,15 @@ class PolicyRunnerV8:
         H = self.cfg.pred_horizon
         A = 6
 
-        noisy_actions = torch.randn(B, H, A, device=device)
-
-        if self._noise_scheduler is not None:
+        if hasattr(self, '_ddim_sampler') and self._ddim_sampler is not None:
+            arm_chunk = self._ddim_sampler.sample(
+                self.model, obs_batch, shape=(B, H, A), device=device,
+            )
+        elif self._noise_scheduler is not None:
+            noisy_actions = torch.randn(B, H, A, device=device)
             arm_chunk = self._denoise(obs_batch, noisy_actions)
         else:
+            noisy_actions = torch.randn(B, H, A, device=device)
             timestep = torch.zeros(B, dtype=torch.long, device=device)
             out = self.model(obs_batch, noisy_actions=noisy_actions, timestep=timestep)
             arm_chunk = noisy_actions - out.get("pred_noise", noisy_actions)

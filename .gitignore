@@ -25,3 +25,15 @@ async_dp/checkpoints/
 
 # Logs
 *.log
+
+# --- v8 산출물 (2026-08-25) ---
+# 기존 규칙은 v7 경로(async_dp/)와 *.pth 기준이라 v8을 못 막았다.
+# v8은 async_dp_v8/ 경로에 *.pt / *.parquet 를 쓴다 — auto-checkpoint가
+# 체크포인트 4.2GB를 커밋해 push가 100MB 한도에 막혔던 원인.
+async_dp_v8/checkpoints/
+async_dp_v8/data/
+async_dp_v8/runs/
+*.pt
+*.ckpt
+*.parquet
+events.out.tfevents.*

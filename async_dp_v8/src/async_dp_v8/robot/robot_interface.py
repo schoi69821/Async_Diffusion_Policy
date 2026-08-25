@@ -7,6 +7,7 @@ from .dxl_client import DxlClient
 from async_dp_v8.constants import (
     JOINT_MAP, NUM_JOINTS, NUM_MOTORS,
     FOLLOWER_GRIP_MIN, FOLLOWER_GRIP_MAX,
+    HOME_QPOS, HOME_TOLERANCE_RAD,
 )
 from async_dp_v8.control.kinematics import qpos_to_ee_pose
 
@@ -20,7 +21,7 @@ class RobotInterface:
     def __init__(self, dxl_client: DxlClient, home_qpos: Optional[np.ndarray] = None,
                  safety_guard=None, contact_threshold_ma: float = 80.0):
         self.dxl = dxl_client
-        self.home_qpos = home_qpos if home_qpos is not None else np.zeros(NUM_JOINTS)
+        self.home_qpos = home_qpos if home_qpos is not None else HOME_QPOS.copy()
         self.safety = safety_guard
         self.contact_threshold_ma = contact_threshold_ma
         self._last_state: Dict[str, np.ndarray] = {}
@@ -46,9 +47,9 @@ class RobotInterface:
         # EE pose from FK
         ee_pose = qpos_to_ee_pose(qpos)
 
-        # Current and PWM - keep all 9 motor values for contact detection
-        current_joints = self._motors_to_joints(raw["present_current"])
-        pwm_joints = self._motors_to_joints(raw["present_pwm"])
+        # Current and PWM - raw 9 motor values (model expects 9 channels)
+        current_raw = raw["present_current"].astype(np.float64)
+        pwm_raw = raw["present_pwm"].astype(np.float64)
 
         obs = {
             "qpos": qpos,
@@ -56,8 +57,8 @@ class RobotInterface:
             "ee_pose": ee_pose,
             "gripper_pos": np.array([gripper_pos]),
             "gripper_vel": np.array([gripper_vel]),
-            "current": current_joints,  # 7 logical joints
-            "pwm": pwm_joints,          # 7 logical joints
+            "current": current_raw,    # 9 raw motors
+            "pwm": pwm_raw,            # 9 raw motors
             "voltage": np.array([voltage]),
         }
         self._last_state = obs
@@ -121,11 +122,19 @@ class RobotInterface:
         gripper_current = abs(current[gripper_idx]) if len(current) > gripper_idx else 0
         return gripper_current > threshold_ma
 
-    def is_at_home(self, thresh_rad: float = 0.05) -> bool:
+    def is_at_home(self, thresh_rad: float = HOME_TOLERANCE_RAD) -> bool:
         if not self._last_state:
             return False
         qpos = self._last_state.get("qpos", np.zeros(NUM_JOINTS))
-        return np.max(np.abs(qpos - self.home_qpos)) < thresh_rad
+        diff = np.abs(qpos - self.home_qpos)
+        max_diff = np.max(diff)
+        if max_diff >= thresh_rad:
+            worst = int(np.argmax(diff))
+            logger.debug(
+                f"is_at_home: max_diff={max_diff:.4f} (joint {worst}), "
+                f"thresh={thresh_rad:.4f}, qpos={qpos.round(3)}, home={self.home_qpos.round(3)}"
+            )
+        return max_diff < thresh_rad
 
     def ee_z_above(self, z_mm: float) -> bool:
         if not self._last_state:
@@ -133,11 +142,25 @@ class RobotInterface:
         ee_pose = self._last_state.get("ee_pose", np.zeros(7))
         return ee_pose[2] * 1000 > z_mm  # Convert m to mm
 
+    def enable_torque(self):
+        """Enable torque on all arm motors (not gripper)."""
+        for motor_id in self.dxl.ids[:NUM_MOTORS - 1]:  # Exclude gripper
+            self.dxl.set_torque(motor_id, True)
+        logger.info(f"Torque enabled on motors {self.dxl.ids[:NUM_MOTORS - 1]}")
+
+    def disable_torque(self):
+        """Disable torque on all motors."""
+        self.dxl.torque_off_all()
+        logger.info("Torque disabled on all motors")
+
     def safe_go_home(self, steps: int = 100, dt: float = 0.02):
         """Safely interpolate to home position."""
         import time
         obs = self.get_observation()
         current = obs["qpos"]
+
+        # Enable torque on arm motors
+        self.enable_torque()
 
         for i in range(steps):
             t = (i + 1) / steps

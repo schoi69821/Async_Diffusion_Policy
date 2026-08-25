@@ -1,18 +1,22 @@
 obs_horizon: 3
 pred_horizon: 12
 execute_horizon: 4
-batch_size: 12
-lr: 1.0e-4
+batch_size: 8
+lr: 2.0e-4
 weight_decay: 1.0e-4
-epochs: 100
+epochs: 200
 amp: true
 grad_clip: 1.0
-ema_decay: 0.995
+ema_decay: 0.99
 phase_balanced_sampling: true
 hard_negative_ratio: 0.25
 num_workers: 4
 pin_memory: true
-save_every: 10
+save_every: 20
 val_every: 5
 log_every: 50
 checkpoint_dir: checkpoints/hybrid_policy_v8
+# LR scheduler: cosine annealing with linear warmup
+lr_scheduler: cosine
+warmup_epochs: 10
+min_lr: 1.0e-6

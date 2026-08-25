@@ -303,6 +303,7 @@ def collect_episode(
     leader: ArmDriver,
     follower: ArmDriver,
     camera: CameraGrabber = None,
+    front_camera: CameraGrabber = None,
     freq: float = 30.0,
 ) -> dict:
     """Collect one teaching episode.
@@ -339,7 +340,8 @@ def collect_episode(
     qvel_list = []       # [T, 7]
     current_list = []    # [T, 7]
     pwm_list = []        # [T, 7]
-    image_list = []      # [T, H, W, 3]
+    image_list = []      # [T, H, W, 3] wrist camera
+    front_image_list = []  # [T, H, W, 3] front camera
 
     stop = False
 
@@ -384,9 +386,11 @@ def collect_episode(
             current_list.append(joints_cur)
             pwm_list.append(joints_pwm)
 
-            # 6. Camera frame
+            # 6. Camera frames
             if camera is not None:
                 image_list.append(camera.grab())
+            if front_camera is not None:
+                front_image_list.append(front_camera.grab())
 
             # Progress display + gripper health check
             step = len(timestamps)
@@ -429,6 +433,7 @@ def collect_episode(
         "current": np.array(current_list, dtype=np.float32),
         "pwm": np.array(pwm_list, dtype=np.float32),
         "images": np.array(image_list, dtype=np.uint8) if image_list else None,
+        "front_images": np.array(front_image_list, dtype=np.uint8) if front_image_list else None,
     }
 
 
@@ -449,9 +454,17 @@ def save_episode(data: dict, path: str):
                 compression="gzip", compression_opts=4,
             )
 
+        if data.get("front_images") is not None:
+            f.create_dataset(
+                "front_images", data=data["front_images"],
+                chunks=(1, *data["front_images"].shape[1:]),
+                compression="gzip", compression_opts=4,
+            )
+
         f.attrs["num_timesteps"] = len(data["timestamps"])
         f.attrs["num_joints"] = data["qpos"].shape[1]
         f.attrs["has_images"] = data["images"] is not None
+        f.attrs["has_front_images"] = data.get("front_images") is not None
         f.attrs["timestamp"] = datetime.now().isoformat()
 
     size_mb = Path(path).stat().st_size / 1024 / 1024
@@ -464,8 +477,9 @@ def main():
     parser = argparse.ArgumentParser(description="Collect v8 teaching episodes")
     parser.add_argument("--leader-port", default=LEADER_PORT)
     parser.add_argument("--follower-port", default=FOLLOWER_PORT)
-    parser.add_argument("--cam", default=WRIST_CAM, help="Camera device")
-    parser.add_argument("--no-camera", action="store_true", help="Skip camera")
+    parser.add_argument("--cam", default=WRIST_CAM, help="Wrist camera device")
+    parser.add_argument("--front-cam", default=FRONT_CAM, help="Front camera device")
+    parser.add_argument("--no-camera", action="store_true", help="Skip cameras")
     parser.add_argument("--freq", type=float, default=30.0, help="Recording Hz")
     parser.add_argument("--episodes", type=int, default=1, help="Number of episodes")
     parser.add_argument("--output-dir", default="data/raw/pen_fixed_hdf5")
@@ -479,7 +493,8 @@ def main():
     print("  ASYNC DP V8 - EPISODE COLLECTION")
     print(f"  Leader:   {args.leader_port}")
     print(f"  Follower: {args.follower_port}")
-    print(f"  Camera:   {'OFF' if args.no_camera else args.cam}")
+    print(f"  Wrist cam: {'OFF' if args.no_camera else args.cam}")
+    print(f"  Front cam: {'OFF' if args.no_camera else args.front_cam}")
     print(f"  Freq:     {args.freq} Hz")
     print(f"  Episodes: {args.episodes}")
     print("=" * 60)
@@ -488,16 +503,24 @@ def main():
     leader = ArmDriver(args.leader_port, "leader", read_only=True)
     follower = ArmDriver(args.follower_port, "follower", read_only=False)
 
-    # Camera
+    # Cameras
     camera = None
+    front_camera = None
     if not args.no_camera:
         try:
             camera = CameraGrabber(args.cam)
             camera.start()
-            logger.info(f"Camera started: {args.cam}")
+            logger.info(f"Wrist camera started: {args.cam}")
         except RuntimeError as e:
-            logger.warning(f"Camera failed: {e}. Continuing without camera.")
+            logger.warning(f"Wrist camera failed: {e}. Continuing without.")
             camera = None
+        try:
+            front_camera = CameraGrabber(args.front_cam, size=96)
+            front_camera.start()
+            logger.info(f"Front camera started: {args.front_cam}")
+        except RuntimeError as e:
+            logger.warning(f"Front camera failed: {e}. Continuing without.")
+            front_camera = None
 
     try:
         for ep_idx in range(args.episodes):
@@ -505,7 +528,7 @@ def main():
             print(f"  Episode {ep_idx + 1}/{args.episodes}")
             print(f"{'─'*60}")
 
-            data = collect_episode(leader, follower, camera, args.freq)
+            data = collect_episode(leader, follower, camera, front_camera, args.freq)
 
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             name = f"{args.prefix}_{ts}_{ep_idx:03d}"
@@ -520,6 +543,8 @@ def main():
     finally:
         if camera:
             camera.stop()
+        if front_camera:
+            front_camera.stop()
         follower.close()
         leader.close()
 

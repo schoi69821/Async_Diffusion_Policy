@@ -8,7 +8,7 @@ crop_encoder:
   out_dim: 128
 
 proprio_encoder:
-  in_dim: 35  # 6+6+7+2+7+7
+  in_dim: 39  # 6+6+7+2+9+9 (qpos+qvel+ee_pose+gripper+current+pwm)
   out_dim: 128
 
 backbone:

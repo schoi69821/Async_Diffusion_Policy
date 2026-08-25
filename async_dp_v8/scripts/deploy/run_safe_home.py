@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Safely move robot to home position."""
 import argparse
-import time
-import numpy as np
 
 from async_dp_v8.robot.dxl_client import DxlClient
 from async_dp_v8.robot.robot_interface import RobotInterface
@@ -29,15 +27,8 @@ def main():
     print(f"Home:    {home}")
     print(f"Delta:   {home - current}")
 
-    steps = int(50 / args.speed)
-    for i in range(steps):
-        t = (i + 1) / steps
-        target = current + t * (home - current)
-        for j, motor_id in enumerate(dxl.ids[:6]):
-            dxl.goal_position_rad(motor_id, target[j])
-        time.sleep(0.02)
-
-    robot.open_gripper()
+    steps = int(100 / args.speed)
+    robot.safe_go_home(steps=steps)
     print("At home position")
     dxl.disconnect()
 

@@ -5,11 +5,12 @@ from async_dp_v8.constants import NUM_GRIP_TOKENS
 
 
 class GripperHead(nn.Module):
-    def __init__(self, in_dim: int = 512, num_tokens: int = NUM_GRIP_TOKENS):
+    def __init__(self, in_dim: int = 512, num_tokens: int = NUM_GRIP_TOKENS, dropout: float = 0.1):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(in_dim, 256),
             nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(256, num_tokens),
         )
 

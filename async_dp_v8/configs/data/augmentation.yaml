@@ -1,15 +1,20 @@
 enabled: true
 color_jitter:
-  brightness: 0.3
-  contrast: 0.3
-  saturation: 0.2
-  hue: 0.05
+  brightness: 0.4
+  contrast: 0.4
+  saturation: 0.3
+  hue: 0.08
 random_crop:
   enabled: true
-  scale: [0.85, 1.0]
+  scale: [0.80, 1.0]
 random_erasing:
-  enabled: false
-  p: 0.1
+  enabled: true
+  p: 0.15
 gaussian_noise:
   enabled: true
-  std: 0.01
+  std: 0.02
+# Action augmentation: small noise on proprio inputs during training
+action_noise:
+  enabled: true
+  qpos_std: 0.005
+  qvel_std: 0.01
